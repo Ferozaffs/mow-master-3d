@@ -22,6 +22,12 @@
     z-index: 5; touch-action: none; text-align: center; letter-spacing: 1px; text-shadow: 0 1px 3px rgba(0,0,0,.5);
   }
   #actBtn.on { background: rgba(160,60,200,.65); }
+  #superToast {
+    position: fixed; top: 84px; left: 50%; transform: translateX(-50%);
+    display: none; z-index: 6; color: #fff; font-size: 20px; font-weight: 700; letter-spacing: 2px;
+    background: rgba(160,20,20,.85); border: 2px solid #ffd479; border-radius: 10px;
+    padding: 10px 22px; text-shadow: 0 2px 6px rgba(0,0,0,.6); pointer-events: none;
+  }
   #hud {
     position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
     color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,.5); text-align: center; pointer-events: none;
@@ -106,6 +112,7 @@
 <div id="help">W/S drive &nbsp;|&nbsp; A/D steer &nbsp;|&nbsp; Shift boost &nbsp;|&nbsp; R restart</div>
 <div id="stick"><div id="knob"></div></div>
 <div id="actBtn"><span id="actLabel">SWING</span></div>
+<div id="superToast">A SUPER GNOME APPEARED — 10 HITS!</div>
 <div id="win">
   <h1 id="winTitle">LAWN MOWED!</h1>
   <p id="winText"></p>
@@ -392,6 +399,12 @@ function updateChickens(dt, t) {
 const gnomes = [];
 let gnomeSeq = 0;
 let gnomeTimer = 10;
+const sgAuto = new URLSearchParams(location.search).has('sgauto'); // debug: auto-hit nearest gnome
+if (sgAuto) setInterval(() => {
+  let best = null, bd = Infinity;
+  for (const g of gnomes) { const d = g.position.distanceTo(man.position); if (d < bd) { bd = d; best = g; } }
+  if (best) batHit({ x: best.position.x - 10, z: best.position.z }, Math.atan2(10, 0));
+}, 500);
 const gnomeParam = new URLSearchParams(location.search).get('gnome');
 if (gnomeParam !== null) gnomeTimer = isNaN(+gnomeParam) ? 0 : +gnomeParam; // debug: ?gnome=0 spawns immediately
 let swingT = 0;
@@ -403,6 +416,7 @@ function spawnGnome(forcePlain) {
   const sgCh = new URLSearchParams(location.search).get('sg');
   const superChance = sgCh !== null ? +sgCh || 0 : 0.05; // ?sg=1 forces supers for testing
   const superG = forcePlain ? false : Math.random() < superChance; // host decides supers
+  if (superG) { superToastPending = true; showSuperToast(); }
   const g = new THREE.Group();
   // squat little body
   const robe = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.8, 12), new THREE.MeshLambertMaterial({ color: superG ? 0x17121e : 0x2f5fc4 }));
@@ -497,6 +511,7 @@ function batHit(attacker = man, heading = walkCtl.heading) {
     }
     u.flying = true;
     sfxHit();
+    if (u.super) u.hp = 0; // final blow
     u.v.set(fh * 17 + (Math.random() - 0.5) * 5, 10 + Math.random() * 5, fh2 * 17 + (Math.random() - 0.5) * 5);
     g.position.y = 0.5;
   }
@@ -820,6 +835,7 @@ let cutCount = 0;
 let total = 0;
 for (let j = 0; j < COUNT; j++) if (heights[j] > 0) total++;
 let started = false, won = false, elapsed = 0;
+const forceStart = new URLSearchParams(location.search).has('start');
 
 const keys = {};
 addEventListener('keydown', e => {
@@ -1038,6 +1054,13 @@ let peer = null;
 const myPlayerId = 'p' + Math.random().toString(36).slice(2, 8);
 let netElapsed = 0;
 let netCutIdx = [], pendingNetCut = [];
+let superToastPending = false;
+const superToastEl = document.getElementById('superToast');
+function showSuperToast() {
+  superToastEl.style.display = 'block';
+  clearTimeout(superToastEl._t);
+  superToastEl._t = setTimeout(() => { superToastEl.style.display = 'none'; }, 3000);
+}
 const remotePlayers = new Map();   // id -> twin
 const tmpVec = new THREE.Vector3();
 
@@ -1153,6 +1176,7 @@ function guestOnData(d) {
   } else if (d.t === 's') {
     netElapsed = d.e;
     cutCount = d.cc;
+    if (d.sgToast) showSuperToast();
     for (const p of d.pl) {
       if (p.id !== myPlayerId) twinFor(p.id).s = p;
     }
@@ -1253,6 +1277,7 @@ setInterval(() => {
     const gn = gnomes.map(g => [g.userData.netId, g.position.x, g.position.z, g.position.y, g.rotation.y, g.userData.flying || g.userData.stun > 0 ? 1 : 0, g.userData.super ? 1 : 0, g.userData.hp]);
     const msg = { t: 's', e: elapsed, cc: cutCount, pl, ch, gn, cut: pendingNetCut };
     pendingNetCut = [];
+    if (superToastPending) { msg.sgToast = 1; superToastPending = false; }
     const m = Math.floor(elapsed / 60), s = Math.floor(elapsed % 60);
     if (won) {
       msg.won = true;
@@ -1348,6 +1373,7 @@ function animate() {
   }
 
   if (!won) {
+    if (forceStart) started = true;
     if (!started && (keys.KeyW || keys.ArrowUp || keys.KeyS || keys.ArrowDown)) started = true;
     if (started) elapsed += dt;
 
