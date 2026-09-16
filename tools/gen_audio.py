@@ -41,6 +41,20 @@ def whistle(freq, dur, vol=1.0, vib=5.2, vibd=0.007):
     r = np.minimum(1, (t[-1] - t) / 0.18)
     return s * a * r * vol
 
+def piano(freq, dur, vol=1.0):
+    """Piano-like additive tone: hammer attack, per-partial decay, soft inharmonicity."""
+    n = int(SR * dur); t = np.arange(n) / SR
+    out = np.zeros(n)
+    r11 = np.random.RandomState(11)
+    for k in range(1, 9):
+        f = freq * (k + 0.0007 * k * k) * (1 + 0.0015 * r11.uniform(-1, 1))
+        # higher partials decay faster, like real piano strings
+        d = dur * 0.85 / (1 + 0.55 * (k - 1))
+        a = np.minimum(1, t / 0.004) * np.exp(-t / d)
+        out += 0.85 * (1.0 / k ** 1.6) * np.sin(2 * np.pi * f * t) * a
+    out += 0.04 * np.exp(-t / 0.03) * rng.uniform(-1, 1, n)  # hammer thud
+    return out * vol
+
 def sine(freq, dur, vol=1.0, slide_to=None, a=0.005, d=0.3):
     n = int(SR * dur); t = np.arange(n) / SR
     f = freq if slide_to is None else np.linspace(freq, slide_to, n)
@@ -89,21 +103,21 @@ def add(sig, at):
 for b in range(BARS):
     ch = CH[prog[b]]
     t0 = b * BAR
-    # deep bass root on beat 1
-    add(pluck(ch["root"], 1.0, 1.0, damp=0.997), t0)
-    add(pluck(ch["root"] / 2, 1.2, 0.7, damp=0.997), t0 + 0.005)
-    # rolled strum on beats 2 & 3 + octave shimmer on beat 3
+    # deep bass root on beat 1 (piano low register + sub octave)
+    add(piano(ch["root"], 1.1, 0.9), t0)
+    add(piano(ch["root"] / 2, 1.3, 0.6), t0 + 0.005)
+    # broken piano chords on beats 2 & 3 + high octave accent on beat 3
     for beat in (1, 2):
         for k, f in enumerate(ch["chord"]):
-            add(pluck(f, 0.65, 0.5), t0 + beat * BEAT + k * 0.014)
-    add(pluck(ch["chord"][0] * 2, 0.5, 0.3), t0 + 2 * BEAT + 0.06)
-    # melody whistle
+            add(piano(f, 0.7, 0.4), t0 + beat * BEAT + k * 0.014)
+    add(piano(ch["chord"][0] * 2, 0.55, 0.28), t0 + 2 * BEAT + 0.06)
+    # melody on a piano voice
     idx = mel_line[mi]; mi += 1
     if idx is not None:
-        add(whistle(ch["mel"][idx], BEAT * 1.75, 0.5), t0 + 0.02)
+        add(piano(ch["mel"][idx], BEAT * 1.75, 0.55), t0 + 0.02)
     idx2 = mel_line[mi]; mi += 1
     if idx2 is not None:
-        add(whistle(ch["mel"][idx2], BEAT * 1.1, 0.38), t0 + BEAT * 2.02)
+        add(piano(ch["mel"][idx2], BEAT * 1.1, 0.4), t0 + BEAT * 2.02)
     # shaker: soft ticks on every beat, accented on 1
     for beat in range(3):
         nn = int(SR * 0.09)
