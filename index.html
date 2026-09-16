@@ -399,13 +399,16 @@ let stepAcc = 0;
 let gnomeVoiceT = 0;
 let chickVoiceT = 0;
 
-function spawnGnome() {
+function spawnGnome(forcePlain) {
+  const sgCh = new URLSearchParams(location.search).get('sg');
+  const superChance = sgCh !== null ? +sgCh || 0 : 0.05; // ?sg=1 forces supers for testing
+  const superG = forcePlain ? false : Math.random() < superChance; // host decides supers
   const g = new THREE.Group();
   // squat little body
-  const robe = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.8, 12), new THREE.MeshLambertMaterial({ color: 0x2f5fc4 }));
+  const robe = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.8, 12), new THREE.MeshLambertMaterial({ color: superG ? 0x17121e : 0x2f5fc4 }));
   robe.position.y = 0.42;
   // big round belly for the classic fat-gnome look
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshLambertMaterial({ color: 0x2f5fc4 }));
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), new THREE.MeshLambertMaterial({ color: superG ? 0x17121e : 0x2f5fc4 }));
   belly.position.set(0, 0.5, 0.04);
   g.add(belly);
   // boots peeking out under the robe
@@ -428,6 +431,7 @@ function spawnGnome() {
   for (const sx of [-0.06, 0.06]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 5), new THREE.MeshLambertMaterial({ color: 0x111111 }));
     eye.position.set(sx, 0.95, 0.14);
+    eye.material = new THREE.MeshLambertMaterial({ color: superG ? 0xff2a2a : 0x111111 });
     g.add(eye);
   }
   // fluffy white beard
@@ -435,7 +439,7 @@ function spawnGnome() {
   beard.scale.set(1.1, 1.4, 0.7);
   beard.position.set(0, 0.78, 0.12);
   // tall pointy red hat, slightly bent at the tip
-  const gnomesHat = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.75, 12), new THREE.MeshLambertMaterial({ color: 0xd23a2a }));
+  const gnomesHat = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.75, 12), new THREE.MeshLambertMaterial({ color: superG ? 0xd9482b : 0xd23a2a }));
   gnomesHat.position.y = 1.35;
   gnomesHat.rotation.x = -0.22;
   gnomesHat.rotation.z = 0.15;
@@ -452,7 +456,8 @@ function spawnGnome() {
   const cave = caves[Math.floor(Math.random() * caves.length)];
   const cl = Math.hypot(cave.x, cave.z) || 1;
   g.position.set(cave.x - cave.x / cl * 3.2, 0, cave.z - cave.z / cl * 3.2);
-  g.userData = { flying: false, v: new THREE.Vector3(), landed: 0, attackT: 0, carrying: null, netId: ++gnomeSeq };
+  g.userData = { flying: false, v: new THREE.Vector3(), landed: 0, attackT: 0, carrying: null, netId: ++gnomeSeq, super: superG, hp: superG ? 10 : 1, stun: 0 };
+  if (superG) g.scale.setScalar(5); // 5x physical size
   scene.add(g);
   gnomes.push(g);
 }
@@ -472,16 +477,28 @@ function batHit(attacker = man, heading = walkCtl.heading) {
   const az = attacker === man ? man.position.z : attacker.z;
   const fh = Math.sin(h), fh2 = Math.cos(h);
   for (const g of gnomes) {
-    if (g.userData.flying || g.userData.landed > 0) continue;
+    const u = g.userData;
+    if (u.flying || u.landed > 0 || u.stun > 0) continue;
     const dx = g.position.x - ax;
     const dz = g.position.z - az;
     const d = Math.hypot(dx, dz);
-    if (d < 2.4 && (dx * fh + dz * fh2) / (d || 1) > 0.05) {
-      g.userData.flying = true;
+    // super gnomes are huge: bigger reach needed to connect
+    if (d > (u.super ? 12 : 2.4)) continue;
+    if ((dx * fh + dz * fh2) / (d || 1) <= 0.05) continue;
+    if (u.super && u.hp > 1) {
+      // stagger, don't launch: needs 10 hits, 1 of 20 spawns
+      u.hp--;
+      u.stun = 0.9;
+      u.flying = true; // brief knock-up, lands standing again
       sfxHit();
-      g.userData.v.set(fh * 17 + (Math.random() - 0.5) * 5, 10 + Math.random() * 5, fh2 * 17 + (Math.random() - 0.5) * 5);
-      g.position.y = 0.5;
+      u.v.set(fh * 6 + (Math.random() - 0.5) * 2, 7 + Math.random() * 2, fh2 * 6 + (Math.random() - 0.5) * 5);
+      g.position.y = 0.3;
+      continue;
     }
+    u.flying = true;
+    sfxHit();
+    u.v.set(fh * 17 + (Math.random() - 0.5) * 5, 10 + Math.random() * 5, fh2 * 17 + (Math.random() - 0.5) * 5);
+    g.position.y = 0.5;
   }
 }
 
@@ -491,22 +508,24 @@ function updateGnomes(dt, t) {
     // spawn pressure scales with lawn progress: 1/4 rate early, full rate in the last 10%
     const p = cutCount / total;
     const f = p < 0.9 ? 0.25 + 0.75 * (p / 0.9) : 1;
-    const maxGnomes = Math.max(1, Math.round(Math.min(1 + elapsed / 25, 6) * f));
+    // exponential scaling with player count: 1x solo, 2x duo, 4x trio, ...
+    const pc = 1 + remotePlayers.size;
+    const scale = Math.pow(2, pc - 1);
+    const maxGnomes = Math.max(1, Math.min(45, Math.round(Math.min(1 + elapsed / 25, 6) * f * scale)));
     if (gnomeTimer <= 0 && gnomes.length < maxGnomes) {
-      gnomeTimer = Math.max(2.5, 8 - elapsed / 15) / f;
+      gnomeTimer = Math.max(1.2, 8 - elapsed / 15) / f / scale;
       spawnGnome();
     }
   }
   for (let gi = gnomes.length - 1; gi >= 0; gi--) {
     const g = gnomes[gi];
     const u = g.userData;
-    const sp = 4.8 + elapsed * 0.004; // faster than a fleeing chicken
+    const sp = (4.8 + elapsed * 0.004) * (u.super ? 0.7 : 1); // supers lumber
     if (u.flying) {
       u.v.y -= 22 * dt;
       g.position.addScaledVector(u.v, dt);
       g.rotation.x += dt * 14;
       if (g.position.y <= 0.05 && u.v.y < 0) {
-        u.landed = 0.9;
         u.flying = false;
         g.position.y = 0;
         g.rotation.x = Math.PI / 2; // knocked flat
@@ -524,12 +543,22 @@ function updateGnomes(dt, t) {
           scene.add(held);
           held.userData.panic = 3;
         }
+        if (u.super && u.hp > 0) {
+          u.stun = 0.9; // super falls hard, gets up and keeps hunting
+        } else {
+          u.landed = 0.9;
+        }
       }
       continue;
     }
     if (u.landed > 0) {
       u.landed -= dt;
       if (u.landed <= 0) { scene.remove(g); gnomes.splice(gi, 1); }
+      continue;
+    }
+    if (u.stun > 0) {
+      u.stun -= dt;
+      if (u.stun <= 0) g.rotation.x = 0; // stands back up
       continue;
     }
     if (u.carrying) {
@@ -1150,13 +1179,19 @@ function guestOnData(d) {
     for (const e of d.gn) {
       let g = gnomes.find(x => x.userData.netId === e[0]);
       if (!g) {
-        spawnGnome();
+        spawnGnome(true); // host decides supers; guests render plain and mirror
         g = gnomes[gnomes.length - 1];
         g.userData.netId = e[0];
       }
       seenGn.add(e[0]);
       g.userData.tx = e[1]; g.userData.tz = e[2]; g.userData.ty = e[3];
       g.rotation.y = e[4];
+      const su = !!e[6];
+      if (su !== !!g.userData.super) {
+        g.userData.super = su;
+        g.userData.hp = su ? 10 : 1;
+      }
+      g.scale.setScalar(su ? 5 : 1);
       if (e[5]) { g.rotation.x += 0.2; } else g.rotation.x = 0;
     }
     for (let i = gnomes.length - 1; i >= 0; i--) {
@@ -1215,7 +1250,7 @@ setInterval(() => {
       c.getWorldPosition(tmpVec);
       return [c.userData.netId, tmpVec.x, tmpVec.z, c.userData.carried ? 1 : 0, c.rotation.y];
     });
-    const gn = gnomes.map(g => [g.userData.netId, g.position.x, g.position.z, g.position.y, g.rotation.y, g.userData.flying ? 1 : 0]);
+    const gn = gnomes.map(g => [g.userData.netId, g.position.x, g.position.z, g.position.y, g.rotation.y, g.userData.flying || g.userData.stun > 0 ? 1 : 0, g.userData.super ? 1 : 0, g.userData.hp]);
     const msg = { t: 's', e: elapsed, cc: cutCount, pl, ch, gn, cut: pendingNetCut };
     pendingNetCut = [];
     const m = Math.floor(elapsed / 60), s = Math.floor(elapsed % 60);
