@@ -2,9 +2,26 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Mow Master 3D</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #87b5e0; font-family: 'Segoe UI', system-ui, sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #87b5e0; font-family: 'Segoe UI', system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: none; }
+  #stick {
+    position: fixed; left: 26px; bottom: 30px; width: 124px; height: 124px; border-radius: 50%;
+    background: rgba(255,255,255,.10); border: 2px solid rgba(255,255,255,.35); display: none; z-index: 5;
+  }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; border-radius: 50%;
+    background: rgba(255,255,255,.5); transform: translate(-50%,-50%); pointer-events: none;
+    box-shadow: 0 3px 8px rgba(0,0,0,.3);
+  }
+  #actBtn {
+    position: fixed; right: 26px; bottom: 40px; width: 92px; height: 92px; border-radius: 50%;
+    background: rgba(106,190,48,.55); border: 2px solid rgba(255,255,255,.5); color: #fff;
+    font-size: 14px; font-weight: 600; display: none; align-items: center; justify-content: center;
+    z-index: 5; touch-action: none; text-align: center; letter-spacing: 1px; text-shadow: 0 1px 3px rgba(0,0,0,.5);
+  }
+  #actBtn.on { background: rgba(160,60,200,.65); }
   #hud {
     position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
     color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,.5); text-align: center; pointer-events: none;
@@ -87,6 +104,8 @@
 <div id="time">0:00</div>
 <div id="roomTag">Room: <b id="roomCode"></b></div>
 <div id="help">W/S drive &nbsp;|&nbsp; A/D steer &nbsp;|&nbsp; Shift boost &nbsp;|&nbsp; R restart</div>
+<div id="stick"><div id="knob"></div></div>
+<div id="actBtn"><span id="actLabel">SWING</span></div>
 <div id="win">
   <h1 id="winTitle">LAWN MOWED!</h1>
   <p id="winText"></p>
@@ -906,6 +925,78 @@ function startEngine() {
   engineNodes = { gain, src };
 }
 
+// ---------- Touch controls (mobile) ----------
+const stickEl = document.getElementById('stick');
+const knobEl = document.getElementById('knob');
+const actBtn = document.getElementById('actBtn');
+const actLabel = document.getElementById('actLabel');
+let isTouch = false;
+const joy = { id: null, baseX: 0, baseY: 0, x: 0, y: 0, mag: 0 };
+let touchGrip = false;
+const STICK_R = 52;
+
+function showTouchUI() {
+  isTouch = true;
+  stickEl.style.display = 'block';
+  actBtn.style.display = 'flex';
+  helpEl.textContent = 'STICK drive/steer | PUSH FAR for boost | GRAB mower to mow';
+}
+addEventListener('touchstart', () => { if (!isTouch) { showTouchUI(); startMusic(); } }, { passive: true, once: true });
+
+function joyUpdate(t) {
+  const dx = t.clientX - joy.baseX, dy = t.clientY - joy.baseY;
+  const len = Math.hypot(dx, dy) || 1;
+  const mag = Math.min(1, len / STICK_R);
+  joy.x = (dx / len) * mag; joy.y = (dy / len) * mag;
+  joy.mag = mag;
+  const k = len / Math.max(len, STICK_R);
+  knobEl.style.transform = 'translate(-50%,-50%) translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
+}
+addEventListener('touchstart', e => {
+  if (!isTouch || !ready) return; // inert while the menu is open
+  for (const t of e.changedTouches) {
+    if (t.clientX < innerWidth * 0.55 && joy.id === null) {
+      e.preventDefault();
+      joy.id = t.identifier;
+      joy.baseX = t.clientX; joy.baseY = t.clientY;
+      joyUpdate(t);
+    }
+  }
+}, { passive: false });
+addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) {
+      joyUpdate(t);
+      e.preventDefault();
+    }
+  }
+}, { passive: false });
+function joyEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) {
+      joy.id = null; joy.x = 0; joy.y = 0; joy.mag = 0;
+      knobEl.style.transform = 'translate(-50%,-50%)';
+    }
+  }
+}
+addEventListener('touchend', joyEnd);
+addEventListener('touchcancel', joyEnd);
+
+actBtn.addEventListener('touchstart', e => {
+  e.preventDefault(); e.stopPropagation();
+  const hx = mower.position.x - Math.sin(mowCtl.heading) * 1.5;
+  const hz = mower.position.z - Math.cos(mowCtl.heading) * 1.5;
+  const nearHandle = Math.hypot(man.position.x - hx, man.position.z - hz) < 2.4;
+  if (mode === 'mow') touchGrip = false;
+  else if (nearHandle) touchGrip = true;
+  else if (swingT <= 0) {
+    swingT = 0.4;
+    sfxSwing();
+    if (isGuest) sendAll({ t: 'sw', x: man.position.x, z: man.position.z, h: walkCtl.heading });
+    else batHit();
+  }
+}, { passive: false });
+
 // ---------- Networking (PeerJS shared-lawn co-op) ----------
 const menuEl = document.getElementById('menu');
 const menuStatus = document.getElementById('menuStatus');
@@ -1229,26 +1320,38 @@ function animate() {
     const hx = mower.position.x - Math.sin(mowCtl.heading) * 1.5;
     const hz = mower.position.z - Math.cos(mowCtl.heading) * 1.5;
     const nearHandle = Math.hypot(man.position.x - hx, man.position.z - hz) < 2.4;
-    if (mouseDown && nearHandle) mode = 'mow';
-    else if (!mouseDown && mode === 'mow') { mode = 'walk'; mowCtl.speed = 0; }
-    helpEl.textContent = mode === 'mow'
-      ? 'GRIPPING HANDLE — W/S drive | A/D steer | Shift boost | RELEASE MOUSE to let go'
-      : 'Hold LEFT MOUSE on the mower handle to grab it | W/A/S/D walk | Shift run';
+    if ((mouseDown || touchGrip) && nearHandle) mode = 'mow';
+    else if (!mouseDown && !touchGrip && mode === 'mow') { mode = 'walk'; mowCtl.speed = 0; }
+    if (isTouch) {
+      if (mode === 'mow') { actLabel.textContent = 'LET GO'; actBtn.classList.add('on'); }
+      else { actBtn.classList.remove('on'); actLabel.textContent = nearHandle ? 'GRAB MOWER' : 'SWING BAT'; }
+    }
+    helpEl.textContent = isTouch
+      ? (mode === 'mow' ? 'GRIPPING HANDLE — STICK drive/steer | PUSH FAR for boost'
+          : 'Walk to the mower handle and tap GRAB | STICK drive | PUSH FAR for run')
+      : (mode === 'mow'
+          ? 'GRIPPING HANDLE — W/S drive | A/D steer | Shift boost | RELEASE MOUSE to let go'
+          : 'Hold LEFT MOUSE on the mower handle to grab it | W/A/S/D walk | Shift run');
 
     const me = mode === 'mow' ? mower : man;
     const ctl = mode === 'mow' ? mowCtl : walkCtl;
 
-    // drive active character
-    const boost = keys.ShiftLeft || keys.ShiftRight;
+    // drive active character (keyboard / on-screen touch joystick)
+    const jActive = joy.id !== null;
+    const boost = keys.ShiftLeft || keys.ShiftRight || (jActive && joy.mag > 0.92);
     const accel = mode === 'mow' ? (boost ? 22 : 12) : (boost ? 18 : 10);
     const maxSpeed = mode === 'mow' ? (boost ? 16 : 9) : (boost ? 10 : 5);
-    if (keys.KeyW || keys.ArrowUp) ctl.speed += accel * dt;
-    else if (keys.KeyS || keys.ArrowDown) ctl.speed -= accel * 0.7 * dt;
+    const fwdIn = keys.KeyW || keys.ArrowUp || (jActive && -joy.y > 0.3);
+    const backIn = keys.KeyS || keys.ArrowDown || (jActive && joy.y > 0.3);
+    const leftIn = keys.KeyA || keys.ArrowLeft || (jActive && joy.x < -0.3);
+    const rightIn = keys.KeyD || keys.ArrowRight || (jActive && joy.x > 0.3);
+    if (fwdIn) ctl.speed += accel * dt;
+    else if (backIn) ctl.speed -= accel * 0.7 * dt;
     else ctl.speed *= Math.pow(0.02, dt); // friction
     ctl.speed = THREE.MathUtils.clamp(ctl.speed, -maxSpeed * 0.5, maxSpeed);
     const turnRate = mode === 'mow' ? 2.2 : 3.0;
-    if (keys.KeyA || keys.ArrowLeft) ctl.heading += dt * turnRate * Math.min(1, Math.abs(ctl.speed) / 2) * Math.sign(ctl.speed || 1);
-    if (keys.KeyD || keys.ArrowRight) ctl.heading -= dt * turnRate * Math.min(1, Math.abs(ctl.speed) / 2) * Math.sign(ctl.speed || 1);
+    if (leftIn) ctl.heading += dt * turnRate * Math.min(1, Math.abs(ctl.speed) / 2) * Math.sign(ctl.speed || 1);
+    if (rightIn) ctl.heading -= dt * turnRate * Math.min(1, Math.abs(ctl.speed) / 2) * Math.sign(ctl.speed || 1);
 
     me.rotation.y = ctl.heading + (mode === 'walk' ? Math.PI : 0); // the man's model faces -z
     me.position.x += Math.sin(ctl.heading) * ctl.speed * dt;
