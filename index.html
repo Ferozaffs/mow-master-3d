@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -114,7 +114,7 @@
 <div id="help">W/S drive &nbsp;|&nbsp; A/D steer &nbsp;|&nbsp; Shift boost &nbsp;|&nbsp; R restart</div>
 <div id="stick"><div id="knob"></div></div>
 <div id="actBtn"><span id="actLabel">SWING</span></div>
-<div id="superToast">A SUPER GNOME APPEARED — 10 HITS!</div>
+<div id="superToast">A SUPER GNOME APPEARED â€” 10 HITS!</div>
 <div id="win">
   <h1 id="winTitle">LAWN MOWED!</h1>
   <p id="winText"></p>
@@ -190,10 +190,15 @@ const heights = new Float32Array(COUNT);
 const px = new Float32Array(COUNT);
 const pz = new Float32Array(COUNT);
 
-// obstacles (trees) — grass is skipped inside their radius
+// obstacles (trees) â€” grass is skipped inside their radius
 const trees = [];
 const trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4a2b });
 const crownMat = new THREE.MeshLambertMaterial({ color: 0x2d6a1e });
+const rockMat = new THREE.MeshLambertMaterial({ color: 0x8d8d93 });
+const caveMat = new THREE.MeshLambertMaterial({ color: 0x121215 });
+const caves = [];
+
+// tree builder must exist before buildProps (hoisted, no-op reorder safe)
 function addTree(x, z, r) {
   trees.push({ x, z, r });
   const g = new THREE.Group();
@@ -220,58 +225,67 @@ function addRock(x, z, r) {
   rock.position.set(x, r * 0.3, z);
   rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
   scene.add(rock);
+  propObjs.push(rock);
   trees.push({ x, z, r: r * 0.9 }); // solid collision + grass skipped
 }
-addRock(18, 6, 1.6);
-addRock(-12, -8, 1.3);
-addRock(-22, 12, 1.1);
-addRock(8, -20, 1.5);
-addRock(-2, 15, 1.0);
-addRock(30, -8, 1.2);
-addRock(-30, -18, 1.1);
-addRock(20, 25, 1.3);
-
-// ---------- Chicken coop (center of the map) ----------
-const coop = new THREE.Group();
-const woodMat = new THREE.MeshLambertMaterial({ color: 0x9c6b3f });
-const darkWood = new THREE.MeshLambertMaterial({ color: 0x6e4a28 });
-const walls = new THREE.Mesh(new THREE.BoxGeometry(5, 2.2, 3.5), woodMat);
-walls.position.y = 1.6;
-const roofL = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.16, 2.2), darkWood);
-roofL.position.set(0, 3.25, -0.95);
-roofL.rotation.x = 0.62;
-const roofR = roofL.clone();
-roofR.position.z = 0.95;
-roofR.rotation.x = -0.62;
-const door = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.5), new THREE.MeshLambertMaterial({ color: 0x1e120a }));
-door.position.set(0, 0.95, 1.76);
-const ramp = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.5), darkWood);
-ramp.position.set(0, 0.35, 2.35);
-ramp.rotation.x = -0.5;
-coop.add(walls, roofL, roofR, door, ramp);
-scene.add(coop);
-// treat it like a tree for grass-skipping + collision
-trees.push({ x: 0, z: 0, r: 3.0 });
-
-// ---------- Gnome caves in the corners ----------
-const caves = [];
-const rockMat = new THREE.MeshLambertMaterial({ color: 0x8d8d93 });
-const caveMat = new THREE.MeshLambertMaterial({ color: 0x121215 });
-for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-  const x = cx * (HALF - 5), z = cz * (HALF - 5);
-  const cave = new THREE.Group();
-  const mound = new THREE.Mesh(new THREE.SphereGeometry(2.6, 12, 9), rockMat);
-  mound.scale.y = 0.55;
-  mound.position.y = 0.2;
-  const mouth = new THREE.Mesh(new THREE.CircleGeometry(1.05, 18), caveMat);
-  mouth.position.set(0, 0.75, 1.9);
-  cave.add(mound, mouth);
-  cave.position.set(x, 0, z);
-  cave.lookAt(0, 0, 0); // entrance faces the lawn's center
-  scene.add(cave);
-  caves.push({ x, z });
-  trees.push({ x, z, r: 2.4 }); // solid + grass skipped around it
+function buildProps(treesLayout, rockLayout, caveLayout) {
+  // tear down props from a previous layout
+  for (const o of propObjs) scene.remove(o);
+  propObjs.length = 0;
+  trees.length = 0;
+  trees.push({ x: 0, z: 0, r: 3.0 }); // chicken coop collision (built below)
+  // trees
+  for (const [x, z, r] of treesLayout) addTree(x, z, r);
+  // rocks
+  for (const [x, z, r] of rockLayout) addRock(x, z, r);
+  // chicken coop (center of the map)
+  const coop = new THREE.Group();
+  const woodMat = new THREE.MeshLambertMaterial({ color: 0x9c6b3f });
+  const darkWood = new THREE.MeshLambertMaterial({ color: 0x6e4a28 });
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(5, 2.2, 3.5), woodMat);
+  walls.position.y = 1.6;
+  const roofL = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.16, 2.2), darkWood);
+  roofL.position.set(0, 3.25, -0.95);
+  roofL.rotation.x = 0.62;
+  const roofR = roofL.clone();
+  roofR.position.z = 0.95;
+  roofR.rotation.x = -0.62;
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.5), new THREE.MeshLambertMaterial({ color: 0x1e120a }));
+  door.position.set(0, 0.95, 1.76);
+  const ramp = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.5), darkWood);
+  ramp.position.set(0, 0.35, 2.35);
+  ramp.rotation.x = -0.5;
+  coop.add(walls, roofL, roofR, door, ramp);
+  scene.add(coop);
+  propObjs.push(coop);
+  // gnome caves
+  caves.length = 0;
+  for (const [cx, cz] of caveLayout) {
+    const cave = new THREE.Group();
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(2.6, 12, 9), rockMat);
+    mound.scale.y = 0.55;
+    mound.position.y = 0.2;
+    const mouth = new THREE.Mesh(new THREE.CircleGeometry(1.05, 18), caveMat);
+    mouth.position.set(0, 0.75, 1.9);
+    cave.add(mound, mouth);
+    cave.position.set(cx, 0, cz);
+    cave.lookAt(0, 0, 0);
+    scene.add(cave);
+    caves.push({ x: cx, z: cz });
+    trees.push({ x: cx, z: cz, r: 2.4 });
+  }
+  // re-skip grass under the new obstacles
+  for (let j = 0; j < COUNT; j++) {
+    let skip = false;
+    for (const tr of trees) {
+      const dx = px[j] - tr.x, dz = pz[j] - tr.z;
+      if (dx * dx + dz * dz < (tr.r + 0.4) ** 2) { skip = true; break; }
+    }
+    heights[j] = skip ? 0 : pristineHeights[j];
+  }
+  heightAttr.needsUpdate = true;
 }
+const propObjs = [];
 
 // ---------- Chickens ----------
 const chickens = [];
@@ -562,11 +576,12 @@ function updateGnomes(dt, t) {
         u.flying = false;
         g.position.y = 0;
         g.rotation.x = Math.PI / 2; // knocked flat
-        // drop any chicken it was carrying — it's rescued
+        // drop any chicken it was carrying â€” it's rescued
         if (u.carrying) {
           const held = u.carrying;
           u.carrying = null;
           held.userData.carried = false;
+          held.userData.by = '';
           held.visible = true;
           g.remove(held);
           held.position.copy(g.position);
@@ -601,7 +616,7 @@ function updateGnomes(dt, t) {
       const d = Math.hypot(dx, dz);
       g.rotation.y = Math.atan2(dx, dz);
       if (d < 2.4) {
-        // delivered — chicken is gone for good, gnome vanishes inside
+        // delivered â€” chicken is gone for good, gnome vanishes inside
         const ci = chickens.indexOf(u.carrying);
         if (ci >= 0) chickens.splice(ci, 1);
         scene.remove(u.carrying);
@@ -615,12 +630,59 @@ function updateGnomes(dt, t) {
       }
       continue;
     }
-    // hunt the nearest free chicken
-    let target = null, best = Infinity;
+    // hunt the nearest free chicken; a man carrying one is an attackable target when close
+    let target = null, best = Infinity, stealFromMan = false;
+    let cx0 = 0, cz0 = 0, carrierId = null, carrierD = Infinity;
     for (const c of chickens) {
       if (c.userData.carried) continue;
+      if (c.userData.by) {
+        const rawId = c.userData.by;
+        let px = null, pz = null;
+        if (rawId === myPlayerId) { px = man.position.x; pz = man.position.z; }
+        else {
+          const tw = remotePlayers.get(rawId);
+          const s = tw && tw.s;
+          if (s && s.m === 'walk') { px = s.mx; pz = s.mz; }
+        }
+        if (px !== null) {
+          const d2 = (px - g.position.x) ** 2 + (pz - g.position.z) ** 2;
+          if (d2 < carrierD) { carrierD = d2; cx0 = px; cz0 = pz; carrierId = rawId; if (d2 < 49) stealFromMan = true; }
+        }
+        continue;
+      }
       const d2 = c.position.distanceToSquared(g.position);
       if (d2 < best) { best = d2; target = c; }
+    }
+    if ((!target || stealFromMan) && carrierId !== null && (!target || carrierD < best)) {
+      const dzm = cz0 - g.position.z, dxm = cx0 - g.position.x;
+      const dm = Math.hypot(dxm, dzm) || 1;
+      g.rotation.y = Math.atan2(dxm, dzm);
+      if (dm > 0.85) {
+        g.position.x += dxm / dm * sp * dt;
+        g.position.z += dzm / dm * sp * dt;
+        g.rotation.z = Math.sin(t * 12) * 0.1;
+      } else {
+        // shoulder-check: the carrier is knocked away, the chicken drops loose
+        if (carrierId === myPlayerId) {
+          man.position.x += dxm / dm * 2.6;
+          man.position.z += dzm / dm * 2.6;
+          man.position.x = THREE.MathUtils.clamp(man.position.x, -HALF + 2, HALF - 2);
+          man.position.z = THREE.MathUtils.clamp(man.position.z, -HALF + 2, HALF - 2);
+          const dropped = mowCarryId !== null ? mowCarryChicken() : null;
+          manDropChicken();
+          if (dropped) gnomeTakeChicken(g, dropped);
+        } else {
+          const gdx = dxm / dm, gdz = dzm / dm;
+          sendAll({ t: 'steal', id: carrierId, dx: gdx, dz: gdz });
+          const st = chickens.find(k => k.userData.by === carrierId);
+          if (st) {
+            st.userData.by = '';
+            st.userData.panic = 2;
+            gnomeTakeChicken(g, st);
+          }
+        }
+      }
+      continue;
     }
     if (!target) continue;
     const dx2 = target.position.x - g.position.x, dz2 = target.position.z - g.position.z;
@@ -675,6 +737,7 @@ for (let gx = 0; gx < cols; gx++) {
 }
 // hide skipped blades entirely
 for (let j = 0; j < COUNT; j++) if (heights[j] < 0) heights[j] = 0;
+const pristineHeights = new Float32Array(heights); // unskipped blade heights for layout swaps
 
 const grassGeo = geo;
 grassGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3));
@@ -735,28 +798,40 @@ const THEMES = {
     label: 'Suburban Lawn',
     sky: 0x87b5e0, fogFar: 160, dirt: 0x8a6b45, lawn: 0x3e7a24,
     root: 0x0a380d, tip: 0x61c738, crown: 0x2d6a1e, trunk: 0x6b4a2b,
-    rock: 0x77777d, cave: 0x8d8d93, sun: 0xfff2d0, sunInt: 1.2, hemiInt: 0.9
+    rock: 0x77777d, cave: 0x8d8d93, sun: 0xfff2d0, sunInt: 1.2, hemiInt: 0.9,
+    trees: [[-25, -20, 2.2], [28, 12, 2.4], [-8, 30, 2.0], [15, -32, 2.3], [-35, 22, 2.1]],
+    rocks: [[18, 6, 1.6], [-12, -8, 1.3], [-22, 12, 1.1], [8, -20, 1.5], [-2, 15, 1.0], [30, -8, 1.2], [-30, -18, 1.1], [20, 25, 1.3]],
+    caves: [[-HALF + 5, -HALF + 5], [HALF - 5, -HALF + 5], [-HALF + 5, HALF - 5], [HALF - 5, HALF - 5]]
   },
   moonlit: {
     label: 'Moonlit Meadow',
     sky: 0x0b1436, fogFar: 150, dirt: 0x1a1420, lawn: 0x14291b,
     root: 0x04120a, tip: 0x2e6b31,
     crown: 0x12361c, trunk: 0x21150f,
-    rock: 0x33333f, cave: 0x14141a, sun: 0x9db4ff, sunInt: 0.55, hemiInt: 0.45
+    rock: 0x33333f, cave: 0x14141a, sun: 0x9db4ff, sunInt: 0.55, hemiInt: 0.45,
+    trees: [[-30, -10, 2.6], [10, 25, 2.2], [35, -30, 2.6], [-35, 30, 2.4]],
+    rocks: [[0, 10, 1.4], [-15, -18, 1.6], [25, -12, 1.3], [-28, 28, 1.2], [8, -28, 1.1], [-30, 5, 1.5], [-8, -5, 1.4]],
+    caves: [[-HALF + 6, 0], [HALF - 6, 0], [0, -HALF + 6], [0, HALF - 6]]
   },
   winter: {
     label: 'Frosty Lawn',
     sky: 0xcfe6f5, fogFar: 140, dirt: 0xa88b6a, lawn: 0xa9c4cc,
     root: 0x23411f, tip: 0x8fd06a,
     crown: 0x274b30, trunk: 0x51382a,
-    rock: 0x9aa2ac, cave: 0x5b5f66, sun: 0xdfeeff, sunInt: 1.05, hemiInt: 1.0
+    rock: 0x9aa2ac, cave: 0x5b5f66, sun: 0xdfeeff, sunInt: 1.05, hemiInt: 1.0,
+    trees: [[-20, -25, 2.0], [-35, 5, 2.6], [25, 20, 2.2], [5, -32, 2.1], [-5, 35, 2.2]],
+    rocks: [[0, -14, 1.2], [-10, 20, 1.0], [30, -18, 1.4], [17, 8, 1.3], [-25, -5, 1.0], [30, 28, 1.2], [-5, 33, 1.4], [12, 0, 1.1]],
+    caves: [[-HALF + 7, -HALF + 7], [HALF - 7, -HALF + 9], [0, HALF - 7], [HALF - 12, HALF - 6]]
   },
   desert: {
     label: 'Desert Plot',
     sky: 0xffd9a0, fogFar: 170, dirt: 0xd8b98a, lawn: 0xb99b62,
     root: 0x6b5a22, tip: 0xbfa544,
     crown: 0x27521f, trunk: 0x8a6435,
-    rock: 0xb59a72, cave: 0x9b8563, sun: 0xffe9c9, sunInt: 1.35, hemiInt: 0.8
+    rock: 0xb59a72, cave: 0x9b8563, sun: 0xffe9c9, sunInt: 1.35, hemiInt: 0.8,
+    trees: [[-30, -25, 2.0], [35, 10, 2.0], [-32, 28, 1.8]],
+    rocks: [[10, 5, 1.6], [-18, -12, 1.4], [0, 25, 1.2], [-25, -5, 1.3], [25, -28, 1.5], [-8, -30, 1.2], [15, 32, 1.2], [38, -6, 1.1], [-38, 12, 1.2]],
+    caves: [[-HALF + 8, -HALF + 4], [HALF - 4, -HALF + 8], [-HALF + 4, HALF - 8], [HALF - 8, HALF - 4]]
   }
 };
 const THE_THEME_ORDER = ['suburban', 'moonlit', 'winter', 'desert'];
@@ -779,6 +854,7 @@ function applyTheme(name) {
   sun.color.setHex(th.sun);
   sun.intensity = th.sunInt;
   hemi.intensity = th.hemiInt;
+  buildProps(th.trees, th.rocks, th.caves); // layouts are part of the map
 }
 applyTheme('suburban');
 
@@ -1141,6 +1217,7 @@ function resetGame() {
   mode = 'walk';
   netCutIdx = []; pendingNetCut = [];
   gnomeTimer = 10;
+  carryId = null; mowCarryId = null;
   seedRaid(); // gnome-raid pieces reset with the round
 }
 
@@ -1218,7 +1295,7 @@ document.getElementById('btnHost').onclick = () => {
       isHost = true;
       document.getElementById('roomCode').textContent = code;
       document.getElementById('roomTag').style.display = 'block';
-      openMenuStatus('Room code: ' + code + ' — share it! Players can join any time while you mow.');
+      openMenuStatus('Room code: ' + code + ' â€” share it! Players can join any time while you mow.');
       p.on('connection', c => {
         conns.add(c);
         c.on('open', () => {
@@ -1337,7 +1414,7 @@ function guestOnData(d) {
     for (const p of d.pl) {
       if (p.id !== myPlayerId) twinFor(p.id).s = p;
     }
-    // chickens/gnomes: host is authority � mow mode syncs by stable id (raid handles its own above)
+    // chickens/gnomes: host is authority ï¿½ mow mode syncs by stable id (raid handles its own above)
     if (d.gm !== 'raid') {
     const seenCh = new Set();
     for (const e of d.ch) {
@@ -1346,8 +1423,14 @@ function guestOnData(d) {
       if (e[4]) { c.visible = false; (c.parent || scene).remove(c); continue; } // carried in a gnome's arms
       seenCh.add(e[0]);
       c.visible = true;
+      c.userData.by = e[3] || '';
       c.userData.tx = e[1]; c.userData.tz = e[2];
       c.rotation.y = e[5];
+      if (e[3] === myPlayerId) {
+        mowCarryId = e[0]; // the man you sent to grab it confirmed
+      } else if (mowCarryId === e[0] && e[3] && e[3] !== myPlayerId) {
+        mowCarryId = null; // someone else grabbed it first
+      }
     }
     for (let i = chickens.length - 1; i >= 0; i--) {
       const c = chickens[i];
@@ -1397,6 +1480,14 @@ function guestOnData(d) {
   } else if (d.t === 'reset') {
     restartT = -1;
     resetGame();
+  } else if (d.t === 'steal') {
+    if (d.id === myPlayerId) {
+      man.position.x += d.dx * 2.6;
+      man.position.z += d.dz * 2.6;
+      man.position.x = THREE.MathUtils.clamp(man.position.x, -HALF + 2, HALF - 2);
+      man.position.z = THREE.MathUtils.clamp(man.position.z, -HALF + 2, HALF - 2);
+      manDropChicken();
+    }
   }
 }
 
@@ -1413,7 +1504,7 @@ function applyCutList(list) {
 function hostOnData(d) {
   if (d.t === 'p') {
     if (d.id === myPlayerId) return;
-    const { _conn, ...s } = d;   // strip the connection object before caching — it can't be serialized
+    const { _conn, ...s } = d;   // strip the connection object before caching â€” it can't be serialized
     const tw = twinFor(s.id);
     tw.s = s;
     tw.conn = _conn;
@@ -1430,7 +1521,7 @@ function hostOnData(d) {
     const c = chickens.find(k => k.userData.netId === d.c && !k.userData.by);
     const gd = remotePlayers.get(d.id);
     const s = gd && gd.s;
-    if (c && s && s.m === 'g' && !s.dead && Math.hypot(c.position.x - s.x, c.position.z - s.z) < 2.6) {
+    if (c && s && (s.m === 'g' || s.m === 'walk') && !s.dead && Math.hypot(c.position.x - (s.m === 'g' ? s.x : s.mx), c.position.z - (s.m === 'g' ? s.z : s.mz)) < 2.6) {
       c.userData.by = d.id;
       sfxCluck();
     }
@@ -1552,6 +1643,12 @@ function updateNetEnts(dt) {
       c.position.copy(ownGnome.position); c.position.y = 0.9; c.position.z -= 0.45;
       continue;
     }
+    if (gameMode === 'mow' && c.userData.by === myPlayerId) {
+      // your rescued chicken rides on the man's back
+      c.position.set(man.position.x, 1.0, man.position.z);
+      c.rotation.y = man.rotation.y;
+      continue;
+    }
     c.position.x += (c.userData.tx - c.position.x) * f;
     c.position.z += (c.userData.tz - c.position.z) * f;
   }
@@ -1640,6 +1737,31 @@ seedRaid = function () {
 
 // local chicken being hauled (netId or null)
 let carryId = null;
+let mowCarryId = null;
+function mowCarryChicken() {
+  return chickens.find(c => c.userData.netId === mowCarryId) || null;
+}
+function manDropChicken() {
+  const c = mowCarryChicken();
+  if (c) {
+    c.userData.by = '';
+    c.userData.panic = 2;
+    c.position.set(man.position.x + (Math.random() - 0.5) * 2, 0, man.position.z + (Math.random() - 0.5) * 2);
+  }
+  sfxHit();
+  mowCarryId = null;
+}
+function gnomeTakeChicken(g, c) {
+  c.userData.by = '';
+  c.userData.carried = true;
+  g.userData.carrying = c;
+  g.add(c);
+  c.position.set(0, 1.05, -0.1);
+  c.rotation.set(0, 0, 0);
+  c.rotation.z = 0.6;
+  c.scale.setScalar(0.75);
+  sfxCluck();
+}
 
 // per-frame raid sim (runs on every client)
 function updateRaid(dt, t) {
@@ -1776,7 +1898,7 @@ function updateRaidGuard(dt, t) {
     const md = (ownGnome.position.x - man.position.x) ** 2 + (ownGnome.position.z - man.position.z) ** 2;
     if (md < tgd) { tgd = md; tg = { x: ownGnome.position.x, z: ownGnome.position.z }; }
   }
-  const chase = tgd < 15 && tg;
+  const chase = tgd < 22 && tg;
   let tgt = chase ? tg : { x: 0, z: 0 };
   if (!chase) {
     let bdC = Infinity;
@@ -1789,22 +1911,22 @@ function updateRaidGuard(dt, t) {
   const dhx = tgt.x - man.position.x, dhz = tgt.z - man.position.z;
   const dhh = Math.hypot(dhx, dhz) || 1;
   const mh = Math.atan2(dhx, dhz);
-  const spM = chase ? 6.2 : 5.2;
+  const spM = chase ? 8.4 : 5.4; // guard is faster than gnomes now
   man.rotation.y = mh + Math.PI;
   man.position.x += Math.sin(mh) * Math.min(spM, dhh) * dt;
   man.position.z += Math.cos(mh) * Math.min(spM, dhh) * dt;
   man.position.x = THREE.MathUtils.clamp(man.position.x, -HALF + 2, HALF - 2);
   man.position.z = THREE.MathUtils.clamp(man.position.z, -HALF + 2, HALF - 2);
   guardSwingT -= dt;
-  if (chase && Math.sqrt(tgd) < 2.6 && guardSwingT <= 0) {
-    guardSwingT = 1.4;
+  if (chase && Math.sqrt(tgd) < 3.4 && guardSwingT <= 0) {
+    guardSwingT = 1.2;
     sfxSwing();
-    const kx = man.position.x + Math.sin(mh) * 2.0, kz = man.position.z + Math.cos(mh) * 2.0;
+    const kx = man.position.x + Math.sin(mh) * 2.4, kz = man.position.z + Math.cos(mh) * 2.4;
     for (const tw of remotePlayers.values()) {
       const s = tw.s;
-      if (s && s.m === 'g' && !s.dead && Math.hypot(s.x - kx, s.z - kz) < 2.4) raidKills.push(s.id);
+      if (s && s.m === 'g' && !s.dead && Math.hypot(s.x - kx, s.z - kz) < 3.2) raidKills.push(s.id);
     }
-    if (ownGnome && ownGnome.visible && Math.hypot(ownGnome.position.x - kx, ownGnome.position.z - kz) < 2.4) raidKills.push(myPlayerId);
+    if (ownGnome && ownGnome.visible && Math.hypot(ownGnome.position.x - kx, ownGnome.position.z - kz) < 3.2) raidKills.push(myPlayerId);
   }
 }
 
@@ -1902,10 +2024,10 @@ function animate() {
       else { actBtn.classList.remove('on'); actLabel.textContent = nearHandle ? 'GRAB MOWER' : 'SWING BAT'; }
     }
     helpEl.textContent = isTouch
-      ? (mode === 'mow' ? 'GRIPPING HANDLE — STICK drive/steer | PUSH FAR for boost'
+      ? (mode === 'mow' ? 'GRIPPING HANDLE â€” STICK drive/steer | PUSH FAR for boost'
           : 'Walk to the mower handle and tap GRAB | STICK drive | PUSH FAR for run')
       : (mode === 'mow'
-          ? 'GRIPPING HANDLE — W/S drive | A/D steer | Shift boost | RELEASE MOUSE to let go'
+          ? 'GRIPPING HANDLE â€” W/S drive | A/D steer | Shift boost | RELEASE MOUSE to let go'
           : 'Hold LEFT MOUSE on the mower handle to grab it | W/A/S/D walk | Shift run');
 
     const me = mode === 'mow' ? mower : man;
@@ -1974,6 +2096,41 @@ function animate() {
     stepAcc += Math.abs(ctl.speed) * dt;
     if (stepAcc > 1.1) { stepAcc = 0; sfxStep(); }
 
+    // debug: ?mowdemo=1 teleports the man through chicken pickup, then to a gnome's face
+    if (new URLSearchParams(location.search).has('mowdemo')) {
+      if (mowCarryId === null) {
+        let bc = null, bd = Infinity;
+        for (const c of chickens) { if (!c.userData.by && !c.userData.carried) { const d2 = c.position.distanceToSquared(man.position); if (d2 < bd) { bd = d2; bc = c; } } }
+        if (bc) man.position.set(bc.position.x + 0.2, 0, bc.position.z);
+      } else if (gnomes.length) {
+        man.position.set(gnomes[0].position.x + 0.6, 0, gnomes[0].position.z);
+      }
+    }
+    // the man can scoop up a free chicken while walking â€” gnomes will come for him
+    if (mode === 'walk' && mowCarryId === null) {
+      for (const c of chickens) {
+        if (c.userData.by || c.userData.carried) continue;
+        if (c.position.distanceTo(man.position) < 1.0) {
+          if (!isGuest) {
+            c.userData.by = myPlayerId;
+            mowCarryId = c.userData.netId;
+            sfxCluck();
+            man._grabSent = null;
+            break;
+          } else if (man._grabSent !== c.userData.netId) {
+            man._grabSent = c.userData.netId;
+            sendAll({ t: 'grab', c: c.userData.netId, id: myPlayerId });
+            break;
+          }
+        }
+      }
+    }
+    const mcr = mowCarryChicken();
+    if (mcr) {
+      mcr.position.set(man.position.x, 1.0, man.position.z);
+      mcr.rotation.y = man.rotation.y;
+    }
+
     if (mode === 'mow') cutGrass();
 
     // gnomes + bat swing animation
@@ -2001,7 +2158,7 @@ function animate() {
       winText.dataset.msg = winText.textContent = 'The lawn gnomes got your whole flock...';
       winEl.style.display = 'flex';
     } else if (!isGuest && progress >= 0.95) {
-      // 95% of the lawn is enough — the last few blades aren't the win condition
+      // 95% of the lawn is enough â€” the last few blades aren't the win condition
       won = true;
       restartT = RESTART_LEN;
       winTitle.textContent = 'LAWN MOWED!';
@@ -2016,14 +2173,14 @@ function animate() {
     const rt = Math.max(1, Math.ceil(restartT));
     const base = winText.dataset.msg || winText.textContent;
     winText.dataset.msg = base;
-    winText.textContent = base + ' — new round starting in ' + rt + 's';
+    winText.textContent = base + ' â€” new round starting in ' + rt + 's';
     if (!isGuest && restartT <= 0) {
       sendAll({ t: 'reset' });
       resetGame();
     }
   }
 
-  // chickens (always alive, even after winning) — host/solo simulate; guests render synced state
+  // chickens (always alive, even after winning) â€” host/solo simulate; guests render synced state
   if (!isGuest) updateChickens(dt, t);
   updateTwins(dt, t);
   updateNetEnts(dt);
