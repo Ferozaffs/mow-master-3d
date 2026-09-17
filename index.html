@@ -1555,7 +1555,6 @@ setInterval(() => {
       msg.cap = raidCap;
       msg.ai = [man.position.x, man.position.z, man.rotation.y];
       msg.ks = raidKills.slice();
-      raidProcessKills();
     }
     pendingNetCut = [];
     if (superToastPending) { msg.sgToast = 1; superToastPending = false; }
@@ -1567,6 +1566,7 @@ setInterval(() => {
       msg.wonText = winText.textContent;
     }
     for (const c of conns) if (c.open) c.send(msg);
+    if (gameMode === 'raid') raidKills.length = 0; // flushed in the snapshot above
   }
 }, 100);
 
@@ -1812,6 +1812,11 @@ function updateRaid(dt, t) {
     }
   }
 
+  // debug: ?guarddemo=1 teleports your gnome onto the man so he must swing
+  if (ownGnome && new URLSearchParams(location.search).has('guarddemo')) {
+    ownGnome.position.set(man.position.x + 0.4, 0, man.position.z);
+  }
+
   // pickups: walk over a free chicken to grab it (host is authority; guests request)
   if (ownGnome && gnomeDeadT <= 0 && carryId === null) {
     for (const c of chickens) {
@@ -1854,7 +1859,7 @@ function updateRaid(dt, t) {
 }
 
 function raidProcessKills() {
-  if (!isHost) return;
+  if (isGuest) return; // solo + host both apply kills locally
   for (const id of raidKills) {
     if (id === myPlayerId) {
       if (carryId !== null) {
@@ -1865,10 +1870,11 @@ function raidProcessKills() {
       gnomeDeadT = 3;
       playBuf('hit', 1);
     } else {
+      // gnome flattened while hauling — release the chicken it was stealing
       for (const k of chickens) if (k.userData.by === id) k.userData.by = '';
     }
   }
-  raidKills.length = 0;
+  // note: raidKills is NOT cleared here — the snapshot broadcast flushes it once guests have seen it
 }
 
 function raidKnockMan(dirX, dirZ) {
@@ -1898,7 +1904,7 @@ function updateRaidGuard(dt, t) {
     const md = (ownGnome.position.x - man.position.x) ** 2 + (ownGnome.position.z - man.position.z) ** 2;
     if (md < tgd) { tgd = md; tg = { x: ownGnome.position.x, z: ownGnome.position.z }; }
   }
-  const chase = tgd < 22 && tg;
+  const chase = tgd < 25 && tg;
   let tgt = chase ? tg : { x: 0, z: 0 };
   if (!chase) {
     let bdC = Infinity;
@@ -1911,7 +1917,7 @@ function updateRaidGuard(dt, t) {
   const dhx = tgt.x - man.position.x, dhz = tgt.z - man.position.z;
   const dhh = Math.hypot(dhx, dhz) || 1;
   const mh = Math.atan2(dhx, dhz);
-  const spM = chase ? 8.4 : 5.4; // guard is faster than gnomes now
+  const spM = chase ? 9.6 : 6.0; // the guard is very fast when hunting gnomes
   man.rotation.y = mh + Math.PI;
   man.position.x += Math.sin(mh) * Math.min(spM, dhh) * dt;
   man.position.z += Math.cos(mh) * Math.min(spM, dhh) * dt;
@@ -1920,8 +1926,7 @@ function updateRaidGuard(dt, t) {
   guardSwingT -= dt;
   if (chase && Math.sqrt(tgd) < 3.4 && guardSwingT <= 0) {
     guardSwingT = 1.2;
-    sfxSwing();
-    const kx = man.position.x + Math.sin(mh) * 2.4, kz = man.position.z + Math.cos(mh) * 2.4;
+    sfxSwing();    const kx = man.position.x + Math.sin(mh) * 2.4, kz = man.position.z + Math.cos(mh) * 2.4;
     for (const tw of remotePlayers.values()) {
       const s = tw.s;
       if (s && s.m === 'g' && !s.dead && Math.hypot(s.x - kx, s.z - kz) < 3.2) raidKills.push(s.id);
