@@ -126,7 +126,6 @@
   <h2>Shared-lawn co-op &mdash; mow 100% &amp; save the chickens together</h2>
   <button id="btnSolo">Play Solo</button>
   <div id="optRow">
-    <button id="optMode" class="ghost">Mode: MOW CO-OP</button>
     <button id="optTheme" class="ghost">Theme: Suburban Lawn</button>
   </div>
   <button id="btnHost">Host Game</button>
@@ -348,14 +347,10 @@ function updateChickens(dt, t) {
     let threatX = threat.position.x, threatZ = threat.position.z, bestD = d;
     for (const tw of remotePlayers.values()) {
       const s = tw.s; if (!s) continue;
-      const tX = (s.m === 'mow' || s.m === 'g') ? s.x : s.mx;
-      const tZ = (s.m === 'mow' || s.m === 'g') ? s.z : s.mz;
+      const tX = s.m === 'mow' ? s.x : s.mx;
+      const tZ = s.m === 'mow' ? s.z : s.mz;
       const pd = Math.hypot(c.position.x - tX, c.position.z - tZ);
       if (pd < bestD) { bestD = pd; threatX = tX; threatZ = tZ; }
-    }
-    if (gameMode === 'raid' && ownGnome && ownGnome.visible) {
-      const pd = Math.hypot(c.position.x - ownGnome.position.x, c.position.z - ownGnome.position.z);
-      if (pd < bestD) { bestD = pd; threatX = ownGnome.position.x; threatZ = ownGnome.position.z; }
     }
     for (const gn of gnomes) {
       if (gn.userData.flying || gn.userData.landed > 0) continue;
@@ -550,7 +545,7 @@ function batHit(attacker = man, heading = walkCtl.heading) {
 }
 
 function updateGnomes(dt, t) {
-  if (started && !won && gameMode !== 'raid') {
+  if (started && !won) {
     gnomeTimer -= dt;
     // spawn pressure scales with lawn progress: 1/4 rate early, full rate in the last 10%
     const p = cutCount / total;
@@ -966,7 +961,6 @@ const mowCtl = { heading: Math.PI, speed: 0 };
 const walkCtl = { heading: Math.PI, speed: 0 };
 let mouseDown = false;
 addEventListener('mousedown', () => {
-  if (gameMode === 'raid') { raidPunchReq = true; startMusic(); return; }
   mouseDown = true;
   startMusic();
   // away from the mower handle, a click swings the bat
@@ -1180,7 +1174,6 @@ addEventListener('touchcancel', joyEnd);
 
 actBtn.addEventListener('touchstart', e => {
   e.preventDefault(); e.stopPropagation();
-  if (gameMode === 'raid') { raidPunchReq = true; return; }
   const hx = mower.position.x - Math.sin(mowCtl.heading) * 1.5;
   const hz = mower.position.z - Math.cos(mowCtl.heading) * 1.5;
   const nearHandle = Math.hypot(man.position.x - hx, man.position.z - hz) < 2.4;
@@ -1217,12 +1210,8 @@ function resetGame() {
   mode = 'walk';
   netCutIdx = []; pendingNetCut = [];
   gnomeTimer = 10;
-  carryId = null; mowCarryId = null;
-  seedRaid(); // gnome-raid pieces reset with the round
+  mowCarryId = null;
 }
-
-// seedRaid is a no-op in mow mode; the gnome-raid section reassigns it with the real builder
-let seedRaid = () => {};
 
 // ---------- Networking (PeerJS shared-lawn co-op) ----------
 const menuEl = document.getElementById('menu');
@@ -1269,7 +1258,6 @@ function openMenuStatus(s) { menuStatus.textContent = s; }
 
 document.getElementById('btnSolo').onclick = () => { openMenuStatus('Solo'); closeMenu(); };
 
-document.getElementById('optMode').onclick = () => { setGameMode(gameMode === 'mow' ? 'raid' : 'mow'); };
 document.getElementById('optTheme').onclick = () => {
   const i = THE_THEME_ORDER.indexOf(currentTheme);
   const next = THE_THEME_ORDER[(i + 1) % THE_THEME_ORDER.length];
@@ -1348,13 +1336,6 @@ document.getElementById('btnJoin').onclick = () => {
 };
 
 function playerNetState() {
-  if (gameMode === 'raid') {
-    return {
-      t: 'p', id: myPlayerId, m: 'g',
-      x: ownGnome ? ownGnome.position.x : 0, z: ownGnome ? ownGnome.position.z : 0,
-      h: walkCtl.heading, sp: Math.abs(walkCtl.speed), dead: gnomeDeadT > 0
-    };
-  }
   return {
     t: 'p', id: myPlayerId, m: mode,
     mx: man.position.x, mz: man.position.z, mh: walkCtl.heading,
@@ -1377,45 +1358,10 @@ function guestOnData(d) {
     if (d.sgToast) showSuperToast();
     if (d.restartIn !== undefined) restartT = d.restartIn;
     if (d.thm) applyTheme(d.thm);
-    if (d.gm && d.gm !== gameMode) { gameMode = d.gm; seedRaid(); document.getElementById('optMode').textContent = 'Mode: ' + (d.gm === 'raid' ? 'GNOME RAID' : 'MOW CO-OP'); }
-    if (d.gm === 'raid') {
-      raidCap = d.cap || 0;
-      // chickens in raid: by = carrier player id
-      const seenCh2 = new Set();
-      for (const e of d.ch) {
-        const c = chickens.find(k => k.userData.netId === e[0]);
-        if (!c) continue;
-        c.userData.by = e[3];
-        if (e[3] === myPlayerId) carryId = e[0];
-        else if (carryId === e[0] && e[3] !== myPlayerId) carryId = null;
-        seenCh2.add(e[0]);
-        c.userData.tx = e[1]; c.userData.tz = e[2]; c.rotation.y = e[4];
-        c.visible = true;
-      }
-      for (let i = chickens.length - 1; i >= 0; i--) {
-        if (!seenCh2.has(chickens[i].userData.netId)) { scene.remove(chickens[i]); chickens.splice(i, 1); }
-      }
-      if (d.ks && d.ks.length) {
-        for (const kid of d.ks) {
-          if (kid === myPlayerId) {
-            carryId = null;
-            gnomeDeadT = 3;
-            playBuf('hit', 1);
-          }
-        }
-      }
-      // AI guard man glide + neighbor swing
-      if (d.ai) {
-        man.position.x += (d.ai[0] - man.position.x) * 0.35;
-        man.position.z += (d.ai[1] - man.position.z) * 0.35;
-        man.rotation.y = d.ai[2];
-      }
-    }
     for (const p of d.pl) {
       if (p.id !== myPlayerId) twinFor(p.id).s = p;
     }
-    // chickens/gnomes: host is authority ï¿½ mow mode syncs by stable id (raid handles its own above)
-    if (d.gm !== 'raid') {
+    // chickens/gnomes: host is authority — sync by stable id, store targets for per-frame glide
     const seenCh = new Set();
     for (const e of d.ch) {
       const c = chickens.find(k => k.userData.netId === e[0]);
@@ -1466,7 +1412,6 @@ function guestOnData(d) {
         gnomes.splice(i, 1);
       }
     }
-    } // end mow-only world sync
     // recently cut blades from everyone else
     applyCutList(d.cut);
     if (d.won && !won) {
@@ -1515,23 +1460,13 @@ function hostOnData(d) {
   } else if (d.t === 'sw') {
     batHit({ x: d.x, z: d.z }, d.h);
     playBuf('hit', .6);
-  } else if (d.t === 'give') {
-    raidDeliver(d.id, d.c);
   } else if (d.t === 'grab') {
     const c = chickens.find(k => k.userData.netId === d.c && !k.userData.by);
     const gd = remotePlayers.get(d.id);
     const s = gd && gd.s;
-    if (c && s && (s.m === 'g' || s.m === 'walk') && !s.dead && Math.hypot(c.position.x - (s.m === 'g' ? s.x : s.mx), c.position.z - (s.m === 'g' ? s.z : s.mz)) < 2.6) {
+    if (c && s && s.m === 'walk' && Math.hypot(c.position.x - s.mx, c.position.z - s.mz) < 2.6) {
       c.userData.by = d.id;
       sfxCluck();
-    }
-  } else if (d.t === 'punch') {
-    const gd = remotePlayers.get(d.id);
-    const s = gd && gd.s;
-    if (s && s.m === 'g' && !s.dead) {
-      const dx = man.position.x - s.x, dz = man.position.z - s.z;
-      const dd = Math.hypot(dx, dz);
-      if (dd < 3.2) raidKnockMan(dx / dd || 1, dz / dd || 0);
     }
   }
 }
@@ -1543,19 +1478,12 @@ setInterval(() => {
   if (isHost && conns.size) {
     const pl = [playerNetState()];
     for (const tw of remotePlayers.values()) if (tw.s) pl.push(tw.s);
-    const ch = gameMode === 'raid'
-      ? chickens.map(c => [c.userData.netId, c.position.x, c.position.z, c.userData.by || '', c.rotation.y])
-      : chickens.map(c => {
-          c.getWorldPosition(tmpVec);
-          return [c.userData.netId, tmpVec.x, tmpVec.z, c.userData.by || '', c.userData.carried ? 1 : 0, c.rotation.y];
-        });
+    const ch = chickens.map(c => {
+      c.getWorldPosition(tmpVec);
+      return [c.userData.netId, tmpVec.x, tmpVec.z, c.userData.by || '', c.userData.carried ? 1 : 0, c.rotation.y];
+    });
     const gn = gnomes.map(g => [g.userData.netId, g.position.x, g.position.z, g.position.y, g.rotation.y, g.userData.flying || g.userData.stun > 0 ? 1 : 0, g.userData.super ? 1 : 0, g.userData.hp]);
-    const msg = { t: 's', e: elapsed, cc: cutCount, pl, ch, gn, cut: pendingNetCut, gm: gameMode, thm: currentTheme };
-    if (gameMode === 'raid') {
-      msg.cap = raidCap;
-      msg.ai = [man.position.x, man.position.z, man.rotation.y];
-      msg.ks = raidKills.slice();
-    }
+    const msg = { t: 's', e: elapsed, cc: cutCount, pl, ch, gn, cut: pendingNetCut, thm: currentTheme };
     pendingNetCut = [];
     if (superToastPending) { msg.sgToast = 1; superToastPending = false; }
     if (restartT > 0) msg.restartIn = Math.ceil(restartT);
@@ -1566,7 +1494,6 @@ setInterval(() => {
       msg.wonText = winText.textContent;
     }
     for (const c of conns) if (c.open) c.send(msg);
-    if (gameMode === 'raid') raidKills.length = 0; // flushed in the snapshot above
   }
 }, 100);
 
@@ -1594,19 +1521,6 @@ function updateTwins(dt, t) {
   for (const tw of remotePlayers.values()) {
     const p = tw.s;
     if (!p) continue;
-    if (p.m === 'g') {
-      // raid: remote players are gnome avatars
-      if (!tw.gn) { tw.gn = makeGnomeAvatar(tw.tint); scene.add(tw.gn); }
-      if (tw.rn) tw.rn.visible = false;
-      if (tw.rm) tw.rm.visible = false;
-      tw.gn.visible = !p.dead;
-      const gl = Math.min(1, dt * 9);
-      tw.gn.position.x += ((p.x ?? 0) - tw.gn.position.x) * gl;
-      tw.gn.position.z += ((p.z ?? 0) - tw.gn.position.z) * gl;
-      tw.gn.rotation.y = (p.h ?? 0) + Math.PI;
-      continue;
-    }
-    if (tw.gn) tw.gn.visible = false;
     const glide = (obj, x, z) => {
       obj.position.x += (x - obj.position.x) * Math.min(1, dt * 9);
       obj.position.z += (z - obj.position.z) * Math.min(1, dt * 9);
@@ -1638,12 +1552,7 @@ function updateNetEnts(dt) {
   for (const c of chickens) {
     if (c.userData.tx === undefined) continue;
     if (!c.visible) continue;
-    if (gameMode === 'raid' && c.userData.by === myPlayerId && ownGnome) {
-      // your stolen chicken rides your gnome
-      c.position.copy(ownGnome.position); c.position.y = 0.9; c.position.z -= 0.45;
-      continue;
-    }
-    if (gameMode === 'mow' && c.userData.by === myPlayerId) {
+    if (c.userData.by === myPlayerId) {
       // your rescued chicken rides on the man's back
       c.position.set(man.position.x, 1.0, man.position.z);
       c.rotation.y = man.rotation.y;
@@ -1660,83 +1569,7 @@ function updateNetEnts(dt) {
   }
 }
 
-// ---------- Game modes ----------
-let gameMode = 'mow'; // 'mow' | 'raid'
-const RAID_TOTAL = 7;
-
-function setGameMode(m) {
-  if (gameMode === m) return;
-  gameMode = m;
-  document.getElementById('optMode').textContent = 'Mode: ' + (m === 'raid' ? 'GNOME RAID' : 'MOW CO-OP');
-}
-
-// ---------- Gnome-raid mode (play as the gnomes!) ----------
-let raidCap = 0;          // chickens hauled to the caves
-let gnomeDeadT = 0;       // respawn timer after being flattened
-let punchCd = 0;
-let guardSwingT = 1.5;
-let raidPunchReq = false;
-const raidKills = [];     // gnomes the AI guard flattened this tick (host -> guests)
-let raidPecks = 0;        // guard swing visual timer for guests
-let ownGnome = null;
-
-function makeGnomeAvatar(tintHex) {
-  const g = new THREE.Group();
-  const tint = new THREE.MeshLambertMaterial({ color: tintHex });
-  const robe = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.8, 12), tint);
-  robe.position.y = 0.42;
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), tint);
-  belly.position.set(0, 0.5, 0.04);
-  g.add(belly);
-  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 14), new THREE.MeshLambertMaterial({ color: 0x3a2410 }));
-  belt.position.y = 0.5;
-  const gHead = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), skin);
-  gHead.position.y = 0.95;
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), skin);
-  nose.position.set(0, 0.88, 0.16);
-  const beard = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), new THREE.MeshLambertMaterial({ color: 0xf5f5f0 }));
-  beard.scale.set(1.1, 1.4, 0.7);
-  beard.position.set(0, 0.78, 0.12);
-  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.75, 12), new THREE.MeshLambertMaterial({ color: 0xd23a2a }));
-  hat.position.y = 1.35;
-  g.add(robe, belt, gHead, nose, beard, hat);
-  return g;
-}
-
-function ensureOwnGnome() {
-  if (ownGnome) { ownGnome.visible = true; return; }
-  const tints = [0x2f5fc4, 0x8a2bd9, 0xd98c2b, 0x2bd9c7, 0xd92b8a];
-  ownGnome = makeGnomeAvatar(tints[remotePlayers.size % tints.length]);
-  scene.add(ownGnome);
-}
-function spawnCaveSpot() {
-  const cave = caves[Math.floor(Math.random() * caves.length)];
-  const cl = Math.hypot(cave.x, cave.z) || 1;
-  return { x: cave.x + cave.x / cl * 3.0, z: cave.z - cave.z / cl * 3.0 };
-}
-
-// real seedRaid for raid mode: replaces the no-op defined with the restart logic
-seedRaid = function () {
-  if (gameMode !== 'raid') {
-    if (ownGnome) ownGnome.visible = false;
-    man.visible = true;
-    mower.visible = true;
-    return;
-  }
-  man.visible = true;  // the man mesh doubles as the AI lawn-guard in raid mode
-  mower.visible = false;
-  man.position.set(0, 0, 26);
-  man.rotation.set(0, Math.PI, 0);
-  gnomeDeadT = 0; guardSwingT = 1.5; punchCd = 0;
-  raidCap = 0;
-  ensureOwnGnome();
-  const sp = spawnCaveSpot();
-  ownGnome.position.set(sp.x, 0, sp.z);
-  ownGnome.rotation.set(0, Math.atan2(-sp.x, -sp.z) + Math.PI, 0);
-};
-
-// local chicken being hauled (netId or null)
-let carryId = null;
+// man chicken-carrying state (mow co-op)
 let mowCarryId = null;
 function mowCarryChicken() {
   return chickens.find(c => c.userData.netId === mowCarryId) || null;
@@ -1763,203 +1596,6 @@ function gnomeTakeChicken(g, c) {
   sfxCluck();
 }
 
-// per-frame raid sim (runs on every client)
-function updateRaid(dt, t) {
-  if (gameMode !== 'raid') return;
-  punchCd = Math.max(0, punchCd - dt);
-  gnomeDeadT = Math.max(0, gnomeDeadT - dt);
-  if (gnomeDeadT > 0) {
-    if (ownGnome) ownGnome.visible = false;
-  } else if (!ownGnome) {
-    ensureOwnGnome();
-    const sp0 = spawnCaveSpot();
-    ownGnome.position.set(sp0.x, 0, sp0.z);
-  }
-  if (ownGnome && gnomeDeadT <= 0) {
-    ownGnome.visible = true;
-    // identical tank controls
-    const fwdR = keys.KeyW || keys.ArrowUp || (joy.id !== null && -joy.y > 0.3);
-    const backR = keys.KeyS || keys.ArrowDown || (joy.id !== null && joy.y > 0.3);
-    const lr = keys.KeyA || keys.ArrowLeft || (joy.id !== null && joy.x < -0.3);
-    const rr = keys.KeyD || keys.ArrowRight || (joy.id !== null && joy.x > 0.3);
-    const boostR = keys.ShiftLeft || keys.ShiftRight || (joy.id !== null && joy.mag > 0.92);
-    const accelR = boostR ? 16 : 10, maxR = boostR ? 10 : 6;
-    if (fwdR) walkCtl.speed += accelR * dt;
-    else if (backR) walkCtl.speed -= accelR * 0.7 * dt;
-    else walkCtl.speed *= Math.pow(0.02, dt);
-    walkCtl.speed = THREE.MathUtils.clamp(walkCtl.speed, -maxR * 0.5, maxR);
-    if (lr) walkCtl.heading += dt * 3.0 * Math.min(1, Math.abs(walkCtl.speed) / 2) * Math.sign(walkCtl.speed || 1);
-    if (rr) walkCtl.heading -= dt * 3.0 * Math.min(1, Math.abs(walkCtl.speed) / 2) * Math.sign(walkCtl.speed || 1);
-    ownGnome.rotation.y = walkCtl.heading + Math.PI;
-    ownGnome.position.x += Math.sin(walkCtl.heading) * walkCtl.speed * dt;
-    ownGnome.position.z += Math.cos(walkCtl.heading) * walkCtl.speed * dt;
-    const lim = HALF - 2;
-    ownGnome.position.x = THREE.MathUtils.clamp(ownGnome.position.x, -lim, lim);
-    ownGnome.position.z = THREE.MathUtils.clamp(ownGnome.position.z, -lim, lim);
-    const wob = t * Math.abs(walkCtl.speed) * 2.2;
-    ownGnome.rotation.z = Math.sin(wob) * 0.08 * Math.min(1, Math.abs(walkCtl.speed));
-  }
-
-  // debug: ?raiddemo=1 teleports your gnome through one chicken/cave round trip per second
-  if (ownGnome && new URLSearchParams(location.search).has('raiddemo')) {
-    if (carryId === null) {
-      let bc = null, bd = Infinity;
-      for (const c of chickens) { if (!c.userData.by) { const d2 = c.position.distanceToSquared(ownGnome.position); if (d2 < bd) { bd = d2; bc = c; } } }
-      if (bc) ownGnome.position.set(bc.position.x + 0.3, 0, bc.position.z);
-    } else {
-      const cv = nearestCave(ownGnome.position.x, ownGnome.position.z);
-      ownGnome.position.set(cv.x, 0, cv.z);
-    }
-  }
-
-  // debug: ?guarddemo=1 teleports your gnome onto the man so he must swing
-  if (ownGnome && new URLSearchParams(location.search).has('guarddemo')) {
-    ownGnome.position.set(man.position.x + 0.4, 0, man.position.z);
-  }
-
-  // pickups: walk over a free chicken to grab it (host is authority; guests request)
-  if (ownGnome && gnomeDeadT <= 0 && carryId === null) {
-    for (const c of chickens) {
-      if (c.userData.by) continue;
-      if (c.position.distanceTo(ownGnome.position) < 1.1) {
-        if (!isGuest) {
-          c.userData.by = myPlayerId;
-          sfxCluck();
-          carryId = c.userData.netId;
-          break;
-        } else if (!ownGnome._grabSent || ownGnome._grabSent !== c.userData.netId) {
-          ownGnome._grabSent = c.userData.netId;
-          sendAll({ t: 'grab', c: c.userData.netId, id: myPlayerId });
-        }
-        break;
-      }
-    }
-  }
-  // deliveries: reach a cave while carrying
-  if (carryId !== null && ownGnome) {
-    const cv = nearestCave(ownGnome.position.x, ownGnome.position.z);
-    if (Math.hypot(cv.x - ownGnome.position.x, cv.z - ownGnome.position.z) < 3.6) {
-      if (!isGuest) { raidDeliver(myPlayerId, carryId); }
-      else sendAll({ t: 'give', c: carryId, id: myPlayerId });
-      carryId = null;
-    }
-  }
-  // your stolen chicken rides your gnome (host local visual; guests use updateNetEnts)
-  if (carryId !== null && ownGnome) {
-    for (const c of chickens) {
-      if (c.userData.by === myPlayerId) {
-        c.position.set(ownGnome.position.x, 0.9, ownGnome.position.z - 0.45);
-        c.rotation.y = ownGnome.rotation.y;
-      }
-    }
-  }
-  // local punch at the guard
-  if (!isGuest) updateRaidGuard(dt, t);
-  updateRaidChickens(dt, t);
-}
-
-function raidProcessKills() {
-  if (isGuest) return; // solo + host both apply kills locally
-  for (const id of raidKills) {
-    if (id === myPlayerId) {
-      if (carryId !== null) {
-        const c = chickens.find(k => k.userData.by === myPlayerId);
-        if (c) c.userData.by = '';
-        carryId = null;
-      }
-      gnomeDeadT = 3;
-      playBuf('hit', 1);
-    } else {
-      // gnome flattened while hauling — release the chicken it was stealing
-      for (const k of chickens) if (k.userData.by === id) k.userData.by = '';
-    }
-  }
-  // note: raidKills is NOT cleared here — the snapshot broadcast flushes it once guests have seen it
-}
-
-function raidKnockMan(dirX, dirZ) {
-  raidManStun = 1.8;
-  man.position.x += dirX * 2.2;
-  man.position.z += dirZ * 2.2;
-  man.position.x = THREE.MathUtils.clamp(man.position.x, -HALF + 2, HALF - 2);
-  man.position.z = THREE.MathUtils.clamp(man.position.z, -HALF + 2, HALF - 2);
-  playBuf('hit', 0.8, 0.8);
-}
-let raidManStun = 0;
-
-// host: the AI lawn-guard + stolen-chicken accounting
-function updateRaidGuard(dt, t) {
-  if (gameMode !== 'raid') return;
-  raidManStun = Math.max(0, raidManStun - dt);
-  if (raidManStun > 0) return;
-  // chase nearest gnome, else patrol the chicken coop
-  let tg = null, tgd = Infinity;
-  for (const tw of remotePlayers.values()) {
-    const s = tw.s;
-    if (!s || s.m !== 'g' || s.dead) continue;
-    const d2 = (s.x - man.position.x) ** 2 + (s.z - man.position.z) ** 2;
-    if (d2 < tgd) { tgd = d2; tg = { x: s.x, z: s.z }; }
-  }
-  if (ownGnome && gnomeDeadT <= 0 && ownGnome.visible) {
-    const md = (ownGnome.position.x - man.position.x) ** 2 + (ownGnome.position.z - man.position.z) ** 2;
-    if (md < tgd) { tgd = md; tg = { x: ownGnome.position.x, z: ownGnome.position.z }; }
-  }
-  const chase = tgd < 25 && tg;
-  let tgt = chase ? tg : { x: 0, z: 0 };
-  if (!chase) {
-    let bdC = Infinity;
-    for (const c of chickens) {
-      if (c.userData.by) continue;
-      const d2 = c.position.distanceToSquared(man.position);
-      if (d2 < bdC) { bdC = d2; tgt = { x: c.position.x, z: c.position.z }; }
-    }
-  }
-  const dhx = tgt.x - man.position.x, dhz = tgt.z - man.position.z;
-  const dhh = Math.hypot(dhx, dhz) || 1;
-  const mh = Math.atan2(dhx, dhz);
-  const spM = chase ? 9.6 : 6.0; // the guard is very fast when hunting gnomes
-  man.rotation.y = mh + Math.PI;
-  man.position.x += Math.sin(mh) * Math.min(spM, dhh) * dt;
-  man.position.z += Math.cos(mh) * Math.min(spM, dhh) * dt;
-  man.position.x = THREE.MathUtils.clamp(man.position.x, -HALF + 2, HALF - 2);
-  man.position.z = THREE.MathUtils.clamp(man.position.z, -HALF + 2, HALF - 2);
-  guardSwingT -= dt;
-  if (chase && Math.sqrt(tgd) < 3.4 && guardSwingT <= 0) {
-    guardSwingT = 1.2;
-    sfxSwing();    const kx = man.position.x + Math.sin(mh) * 2.4, kz = man.position.z + Math.cos(mh) * 2.4;
-    for (const tw of remotePlayers.values()) {
-      const s = tw.s;
-      if (s && s.m === 'g' && !s.dead && Math.hypot(s.x - kx, s.z - kz) < 3.2) raidKills.push(s.id);
-    }
-    if (ownGnome && ownGnome.visible && Math.hypot(ownGnome.position.x - kx, ownGnome.position.z - kz) < 3.2) raidKills.push(myPlayerId);
-  }
-}
-
-function raidDeliver(pid, cid) {
-  const ci = chickens.findIndex(c => c.userData.netId === cid && c.userData.by === pid);
-  if (ci >= 0) {
-    chickens.splice(ci, 1);
-    raidCap++;
-    sfxCluck();
-  }
-}
-
-// chickens in raid: host simulates fleeing from guard/the gnomes
-function updateRaidChickens(dt, t) {
-  if (isGuest || gameMode !== 'raid') return;
-  updateChickens(dt, t);
-  // carried chickens ride their gnome (recomputed for the broadcast)
-  for (const c of chickens) {
-    if (!c.userData.by) continue;
-    if (c.userData.by === myPlayerId) {
-      if (ownGnome) { c.position.set(ownGnome.position.x, 0.9, ownGnome.position.z - 0.45); c.rotation.y = ownGnome.rotation.y; }
-    } else {
-      const tw = remotePlayers.get(c.userData.by);
-      const s = tw && tw.s;
-      if (s) { c.position.set(s.x, 0.9, s.z - 0.45); c.rotation.y = s.h ?? 0; }
-    }
-  }
-}
 const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 6, 45);
 
@@ -1979,44 +1615,9 @@ function animate() {
   }
 
   if (!won) {
-    if (gameMode === 'raid') {
-      if (!started && (joy.id !== null || keys.KeyW || keys.KeyS)) started = true;
-      if (started) elapsed += dt;
-      updateRaid(dt, t);
-      raidProcessKills();
-      // raid HUD
-      const progR = raidCap / RAID_TOTAL;
-      fill.style.width = (progR * 100) + '%';
-      pct.textContent = 'Chickens stolen: ' + raidCap + '/' + RAID_TOTAL;
-      if (isTouch) {
-        actBtn.classList.remove('on');
-        actLabel.textContent = punchCd > 0 ? 'RECHARGING' : 'PUNCH';
-      }
-      helpEl.textContent = isTouch
-        ? 'Steal chickens into the caves! Tap button to punch the guard'
-        : 'Steal chickens into the caves! SPACE: punch the guard back';
-      if ((raidPunchReq || keys.Space) && punchCd <= 0) {
-        punchCd = 2.5;
-        if (ownGnome) {
-          const gx = ownGnome.position.x, gz = ownGnome.position.z;
-          if (isHost) {
-            const dx = man.position.x - gx, dz = man.position.z - gz;
-            const dd = Math.hypot(dx, dz);
-            if (dd < 3.2) raidKnockMan(dx / dd || 1, dz / dd || 0);
-          } else sendAll({ t: 'punch', id: myPlayerId });
-        }
-      }
-      raidPunchReq = false;
-      if (!isGuest && raidCap >= RAID_TOTAL) {        won = true;
-        restartT = RESTART_LEN;
-        winTitle.textContent = 'THE GNOMES WIN!';
-        winText.dataset.msg = winText.textContent = 'The gnome horde hauled every chicken home.';
-        winEl.style.display = 'flex';
-      }
-    } else {
-      if (forceStart) started = true;
-      if (!started && (keys.KeyW || keys.ArrowUp || keys.KeyS || keys.ArrowDown || joy.id !== null || mode === 'mow' || touchGrip)) started = true;
-      if (started) elapsed += dt;
+    if (forceStart) started = true;
+    if (!started && (keys.KeyW || keys.ArrowUp || keys.KeyS || keys.ArrowDown || joy.id !== null || mode === 'mow' || touchGrip)) started = true;
+    if (started) elapsed += dt;
 
     // grab / release logic
     const hx = mower.position.x - Math.sin(mowCtl.heading) * 1.5;
@@ -2170,7 +1771,6 @@ function animate() {
       winText.dataset.msg = winText.textContent = 'You finished in ' + timeEl.textContent + ' with ' + chickens.length + ' chickens alive';
       winEl.style.display = 'flex';
     }
-    } // end mow-mode branch
   }
 
   if (won && restartT > 0) {
@@ -2203,10 +1803,9 @@ function animate() {
     }
   }
 
-  // camera follows the active character (or your gnome in raid mode)
-  let follow, ah;
-  if (gameMode === 'raid' && ownGnome) { follow = ownGnome; ah = walkCtl.heading; }
-  else { ah = mode === 'mow' ? mowCtl.heading : walkCtl.heading; follow = mode === 'mow' ? mower : man; }
+  // camera follows the active character
+  const ah = mode === 'mow' ? mowCtl.heading : walkCtl.heading;
+  const follow = mode === 'mow' ? mower : man;
   const fx = Math.sin(ah), fz = Math.cos(ah);
   const target = new THREE.Vector3(
     follow.position.x - fx * 9,
